@@ -1,18 +1,25 @@
 <script setup lang="ts">
-import {createWorker, recognize} from 'tesseract.js';
-import { onMounted, ref } from 'vue';
+import { recognize } from 'tesseract.js';
+import { computed, ref } from 'vue';
 import { onBeforeRouteLeave } from 'vue-router';
 
+const imgElement = ref();
+const canvasElement = ref<HTMLCanvasElement>();
 const fileUrl = ref('');
 const progress = ref(0);
 const status = ref('');
 const result = ref<string>();
+const cvReady = ref(false);
 
-const setup = async () => {
-  const worker = await createWorker('eng');
-
-
+const openCvReadyHandler = () => {
+  console.log('opencvIsReady');
+  cvReady.value = true;
 };
+
+document.addEventListener('opencvIsReady', openCvReadyHandler);
+
+const getOpencvReady = computed(() => cvReady.value ? 'opencv ready!' : 'opencv not ready!');
+const isDisabled = computed(() => !cvReady.value);
 
 const onFileChange = (event: Event) => {
   const file = (event.target as HTMLInputElement).files?.[0];
@@ -21,9 +28,27 @@ const onFileChange = (event: Event) => {
   }
 
   fileUrl.value = URL.createObjectURL(file);
+};
+
+const onLoadImage = () => {
+  if (!imgElement) {
+    return;
+  }
+
+  let src = window.cv.imread(imgElement.value);
+  let dst = new window.cv.Mat();
+  window.cv.cvtColor(src, dst, window.cv.COLOR_RGBA2GRAY);
+  window.cv.imshow('canvasOutput', dst);
+
+  const canvasFileUrl = canvasElement.value?.toDataURL('image/png');
+  if (!fileUrl) {
+    src.delete();
+    dst.delete();
+    return;
+  }
 
   recognize(
-    fileUrl.value,
+    canvasFileUrl,
     'kor',
     {
       logger: m => {
@@ -40,27 +65,26 @@ const onFileChange = (event: Event) => {
       }
 
       result.value = res.data.text;
-    })
+    }).finally(() => {
+      src.delete();
+      dst.delete();
+    });
 };
-
-onMounted(() => {
-  setTimeout(() => {
-    console.log(cv);
-    console.log(window.cv_ready);
-  }, 2000);
-})
 
 onBeforeRouteLeave(() => {
   URL.revokeObjectURL(fileUrl.value);
+  document.removeEventListener('opencvIsReady', openCvReadyHandler);
 });
 </script>
 
 <template>
   <div class="flex-column">
+    <h2>{{getOpencvReady}}</h2>
     <input
       type="file"
       accept="image/*"
       @change="onFileChange"
+      :disabled="isDisabled"
     />
     <div>
       <progress
@@ -69,7 +93,21 @@ onBeforeRouteLeave(() => {
       />
       status: {{status}}
     </div>
-    result: {{result}}
+    <template v-if="fileUrl">
+      <h3>원본 이미지</h3>
+      <img
+        ref="imgElement"
+        alt="원본 이미지"
+        :src="fileUrl"
+        @load="onLoadImage"
+      />
+      <h3>그레이스케일 이미지</h3>
+      <canvas
+        ref="canvasElement"
+        id="canvasOutput"
+      />
+      result: {{result}}
+    </template>
   </div>
 </template>
 
@@ -80,5 +118,6 @@ onBeforeRouteLeave(() => {
   align-items: center;
   justify-content: center;
   height: 100vh;
+  gap: 0.6rem;
 }
 </style>
